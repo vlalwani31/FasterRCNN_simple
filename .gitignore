@@ -15,4 +15,4 @@ npm-debug.log
 package-lock.json
 
 # for Ahmed
-ai_admissions.code-workspace
+data/
