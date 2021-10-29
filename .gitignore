@@ -1,0 +1,18 @@
+.DS_Store
+
+.vscode/
+env/
+**/__pycache__/
+.pytest_cache/
+*.egg-info/
+*.png
+*.csv
+*.pyc
+
+#electronJS
+node_modules/
+npm-debug.log
+package-lock.json
+
+# for Ahmed
+ai_admissions.code-workspace
