@@ -68,6 +68,15 @@ def output_flattening(out_r,out_c,anchors):
     #######################################
     # TODO flatten the output tensors and anchors
     #######################################
+    '''
+    out_r = let's day (x,4,y,z) is it a list? or just 1 tensor coming in?
+    flatten_regr = torch.zeros(2)
+    now
+    flatten_reger[0] = out_r[0]*out_r[2]*out_r[3]
+    flatten_reger[1] = out_r[1]
+    ^^^
+    does that make sense?
+    '''
     return flatten_regr, flatten_clas, flatten_anchors
 
 
@@ -84,4 +93,8 @@ def output_decoding(flatten_out,flatten_anchors, device='cpu'):
     #######################################
     # TODO decode the output
     #######################################
+    '''
+    for this it says box is same as flatten_anchors, so i am just returning:
+    box = flatten_anchors
+    '''
     return box
