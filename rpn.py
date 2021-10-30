@@ -26,7 +26,7 @@ class RPNHead(torch.nn.Module):
         self.batch4 = nn.BatchNorm2d(128)
         self.conv5 = nn.Conv2d(128,256,5, padding='same')
         self.intermediate = nn.Conv2d(256,1,3, padding='same')
-        self.batch5 = nn.BatchNorm2d(1) #ask someone to look at this
+        self.batch5 = nn.BatchNorm2d(256) #ask someone to look at this
         self.classifier = nn.Conv2d(1,1,1, padding='same')
         self.regressor = nn.Conv2d(1,1,4, padding='same')
 
@@ -54,11 +54,11 @@ class RPNHead(torch.nn.Module):
     def forward(self, X):
 
         #TODO forward through the Backbone
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch1(self.conv1(X))), kernel_size=5, stride=2) 
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch2(self.conv2(X))), kernel_size=5, stride=2)
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=5, stride=2)
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=5, stride=2)
-        X = nn.functional.relu(self.batch5(self.intermediate(X)))
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch1(self.conv1(X))), kernel_size=2, stride=2) 
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch2(self.conv2(X))), kernel_size=2, stride=2)
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=2, stride=2)
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=2, stride=2)
+        X = nn.functional.relu(self.batch5(self.conv5(X)))
         X1 = nn.functional.sigmoid(self.classifier(X))
         X2 = self.regressor(X)
         #TODO forward through the Intermediate layer
