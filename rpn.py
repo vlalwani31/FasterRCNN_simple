@@ -59,8 +59,8 @@ class RPNHead(torch.nn.Module):
         X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=5, stride=2)
         X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=5, stride=2)
         X = nn.functional.relu(self.batch5(self.intermediate(X)))
-        X = nn.functional.sigmoid(self.classifier(X))
-        X = self.regressor(X)
+        X1 = nn.functional.sigmoid(self.classifier(X))
+        X2 = self.regressor(X)
         #TODO forward through the Intermediate layer
 
 
@@ -99,6 +99,8 @@ class RPNHead(torch.nn.Module):
         ######################################
         # TODO create anchors
         ######################################
+        
+
         assert anchors.shape == (grid_sizes[0] , grid_sizes[1],4)
 
         return anchors
