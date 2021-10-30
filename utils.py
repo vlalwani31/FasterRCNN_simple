@@ -77,6 +77,19 @@ def output_flattening(out_r,out_c,anchors):
     ^^^
     does that make sense?
     '''
+    flatten_regr = torch.zeros(2)
+    flatten_clas = torch.zeros(1)
+    flatten_anchors = torch.zeros(2)
+    assert(out_r[0] != out_c[0],"bz is different for row and column")
+    bz = out_r[0]
+    flatten_regr[0] = bz*out_r[2]*out_r[3]
+    flatten_regr[1] = out_r[1]
+
+    flatten_clas[0] = bz*out_c[2]*out_c[3]
+
+    flatten_anchors[0] = bz*anchors[0]*anchors[1]
+    flatten_anchors[1] = anchors[3]
+
     return flatten_regr, flatten_clas, flatten_anchors
 
 
