@@ -16,7 +16,7 @@ class RPNHead(torch.nn.Module):
 
         self.device=device
         # TODO Define Backbone
-        self.conv1 = nn.Conv2d(1,16,5, padding='same')
+        self.conv1 = nn.Conv2d(3,16,5, padding='same')
         self.batch1 = nn.BatchNorm2d(16)
         self.conv2 = nn.Conv2d(16,32,5, padding='same')
         self.batch2 = nn.BatchNorm2d(32)
