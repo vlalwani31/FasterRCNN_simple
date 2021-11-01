@@ -80,7 +80,7 @@ def output_flattening(out_r,out_c,anchors):
     
     assert(out_r[0] != out_c[0],"bz is different for row and column")
     flatten_regr = out_r.view(-1,4)
-    flatten_clas = out_c.view(-1,4)
+    flatten_clas = out_c.view(-1)
     flatten_anchors = anchors.view(-1,4)
 
     return flatten_regr, flatten_clas, flatten_anchors
