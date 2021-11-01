@@ -25,10 +25,11 @@ class RPNHead(torch.nn.Module):
         self.conv4 = nn.Conv2d(64,128,5, padding='same')
         self.batch4 = nn.BatchNorm2d(128)
         self.conv5 = nn.Conv2d(128,256,5, padding='same')
-        self.intermediate = nn.Conv2d(256,1,3, padding='same')
-        self.batch5 = nn.BatchNorm2d(256) #ask someone to look at this
-        self.classifier = nn.Conv2d(1,1,1, padding='same')
-        self.regressor = nn.Conv2d(1,1,4, padding='same')
+        self.batch5 = nn.BatchNorm2d(256)
+        self.intermediate = nn.Conv2d(256,256,3, padding='same')
+        self.intermediate_batch = nn.BatchNorm2d(256)
+        self.classifier = nn.Conv2d(256,1,1, padding='same')
+        self.regressor = nn.Conv2d(256,4,1, padding='same')
 
         # TODO  Define Intermediate Layer
 
@@ -54,20 +55,21 @@ class RPNHead(torch.nn.Module):
     def forward(self, X):
 
         #TODO forward through the Backbone
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch1(self.conv1(X))), kernel_size=2, stride=2) 
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch2(self.conv2(X))), kernel_size=2, stride=2)
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=2, stride=2)
-        X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=2, stride=2)
-        X = nn.functional.relu(self.batch5(self.conv5(X)))
-        X1 = nn.functional.sigmoid(self.classifier(X))
-        X2 = self.regressor(X)
-        #TODO forward through the Intermediate layer
+        # X = nn.functional.max_pool2d(nn.functional.relu(self.batch1(self.conv1(X))), kernel_size=2, stride=2)
+        # X = nn.functional.max_pool2d(nn.functional.relu(self.batch2(self.conv2(X))), kernel_size=2, stride=2)
+        # X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=2, stride=2)
+        # X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=2, stride=2)
+        # X = nn.functional.relu(self.batch5(self.conv5(X)))
+        X = self.forward_backbone(X)
 
+        #TODO forward through the Intermediate layer
+        X = nn.functional.relu(self.intermediate_batch(self.intermediate(X)))
 
         #TODO forward through the Classifier Head
-
+        logits = nn.functional.sigmoid(self.classifier(X))
 
         #TODO forward through the Regressor Head
+        bbox_regs = self.regressor(X)
 
         assert logits.shape[1:4]==(1,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
         assert bbox_regs.shape[1:4]==(4,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
@@ -85,6 +87,11 @@ class RPNHead(torch.nn.Module):
     def forward_backbone(self,X):
         #####################################
         # TODO forward through the backbone
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch1(self.conv1(X))), kernel_size=2, stride=2)
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch2(self.conv2(X))), kernel_size=2, stride=2)
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch3(self.conv3(X))), kernel_size=2, stride=2)
+        X = nn.functional.max_pool2d(nn.functional.relu(self.batch4(self.conv4(X))), kernel_size=2, stride=2)
+        X = nn.functional.relu(self.batch5(self.conv5(X)))
         #####################################
         assert X.shape[1:4]==(256,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
 
@@ -98,8 +105,19 @@ class RPNHead(torch.nn.Module):
     def create_anchors(self, aspect_ratio, scale, grid_sizes, stride):
         ######################################
         # TODO create anchors
+        r,c = grid_sizes
+        x_vals = int((torch.arange(c) * stride) + (stride / 2))
+        y_vals = int((torch.arange(r) * stride) + (stride / 2))
+        w_decoded = torch.sqrt(aspect_ratio * scale * scale).item()
+        h_decoded = w_decoded / aspect_ratio
+        anchors = torch.zeros(r, c, 4)
+        for i in range(r):
+            anchors[i,:,0] = x_vals
+            anchors[i,:,1] = y_vals[i]
+            anchors[i,:,2] = w_decoded
+            anchors[i,:,3] = h_decoded
+
         ######################################
-        
 
         assert anchors.shape == (grid_sizes[0] , grid_sizes[1],4)
 
@@ -124,6 +142,14 @@ class RPNHead(torch.nn.Module):
     def create_batch_truth(self,bboxes_list,indexes,image_shape):
         #####################################
         # TODO create ground truth for a batch of images
+        g_class_list = []
+        g_coord_list = []
+        for i in range(len(indexes)):
+            cl_out, co_out = create_ground_truth(bboxes_list[i], indexes[i], self.anchors_param['grid_size'], self.anchors, image_shape)
+            g_class_list.append(cl_out)
+            g_coord_list.append(co_out)
+        ground_clas = torch.stack(g_class_list, dim = 0)
+        ground_coord = torch.stack(g_coord_list, dim = 0)
         #####################################
         assert ground_clas.shape[1:4]==(1,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
         assert ground_coord.shape[1:4]==(4,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
@@ -149,6 +175,8 @@ class RPNHead(torch.nn.Module):
 
         #####################################################
         # TODO create ground truth for a single image
+        ground_clas = torch.zeros(1, grid_size[0], grid_size[1])
+        
         #####################################################
 
         self.ground_dict[key] = (ground_clas, ground_coord)
@@ -248,5 +276,5 @@ class RPNHead(torch.nn.Module):
         # TODO perform NSM
         ##################################
         return nms_clas,nms_prebox
-    
+
 if __name__=="__main__":
