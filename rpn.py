@@ -175,8 +175,8 @@ class RPNHead(torch.nn.Module):
 
         #####################################################
         # TODO create ground truth for a single image
-        ground_clas = torch.zeros(1, grid_size[0], grid_size[1])
-        
+        ground_clas = torch.zeros(1, grid_size[0], grid_size[1]) + 0.5
+        ground_coord = torch.zeros(4,grid_size[0],grid_size[1])
         #####################################################
 
         self.ground_dict[key] = (ground_clas, ground_coord)
