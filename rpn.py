@@ -177,6 +177,31 @@ class RPNHead(torch.nn.Module):
         # TODO create ground truth for a single image
         ground_clas = torch.zeros(1, grid_size[0], grid_size[1]) + 0.5
         ground_coord = torch.zeros(4,grid_size[0],grid_size[1])
+        # iou_results = torch.zeros(grid_size[0], grid_size[1], len(bboxes))
+        anch = anchors.view(-1,4)
+        t_bboxes = torch.tensor(bboxes)
+        y_b_1 = t_bboxes[:,0]
+        y_b_2 = t_bboxes[:,2]
+        x_b_1 = t_bboxes[:,1]
+        x_b_2 = t_bboxes[:,3]
+        t_bboxes[:,0] = (x_b_2 + x_b_1) / 2
+        t_bboxes[:,1] = (y_b_2 + y_b_1) / 2
+        t_bboxes[:,2] = x_b_2 - x_b_1
+        t_bboxes[:,3] = y_b_2 - y_b_1
+        iou_results = IOU(anch, t_bboxes)
+        iou_results = iou_results.view(grid_size[0],grid_size[1], len(bboxes))
+        # for i in range(grid_size[0]):
+        #     for j in range(grid_size[1]):
+        #         iou_results[i,j,:] = torch.tensor(MultiApply(IOU, anch[i,j,:], bboxes))
+        max_vals, max_ind = torch.max(iou_results, 2)
+        ground_clas[0,max_vals < 0.3] = 0
+        a = max_vals > 0.7
+        ground_clas[0,a] = 1
+        ground_coord[0,a] = (t_bboxes(max_ind[a],0) - anchors(a,0)) / anchors(a,2)
+        ground_coord[1,a] = (t_bboxes(max_ind[a],1) - anchors(a,1)) / anchors(a,3)
+        ground_coord[2,a] = torch.log(t_bboxes(max_ind[a],2)) - torch.log(anchors(a,2))
+        ground_coord[3,a] = torch.log(t_bboxes(max_ind[a],3)) - torch.log(anchors(a,3))
+
         #####################################################
 
         self.ground_dict[key] = (ground_clas, ground_coord)
@@ -198,8 +223,13 @@ class RPNHead(torch.nn.Module):
 
         #torch.nn.BCELoss()
         # TODO compute classifier's loss
-
-        return loss,sum_count
+        criterion = torch.nn.BCELoss()
+        p_targ = torch.ones_like(p_out)
+        n_targ = torch.zeros_like(n_out)
+        loss1 = criterion(p_out, p_targ)
+        loss2 = criterion(n_out, n_targ)
+        loss = (loss1 + loss2) / 2
+        return loss
 
 
 
@@ -207,11 +237,12 @@ class RPNHead(torch.nn.Module):
     # Input:
     #       pos_target_coord: (positive_on_mini_batch,4) (ground truth of the regressor for sampled anchors with positive gt labels)
     #       pos_out_r: (positive_on_mini_batch,4)        (output of the regressor for sampled anchors with positive gt labels)
-    def loss_reg(self,pos_target_coord,pos_out_r):
-            #torch.nn.SmoothL1Loss()
-            # TODO compute regressor's loss
-
-            return loss, sum_count
+    def loss_reg(self, pos_target_coord, pos_out_r):
+        #torch.nn.SmoothL1Loss()
+        # TODO compute regressor's loss
+        criterion = torch.nn.BCELoss()
+        loss = criterion(pos_out_r, pos_target_coord)
+        return loss
 
 
 
@@ -223,11 +254,45 @@ class RPNHead(torch.nn.Module):
     #       targ_regr:(bz,4,grid_size[0],grid_size[1])
     #       l: lambda constant to weight between the two losses
     #       effective_batch: the number of anchors in the effective batch (M in the handout)
-    def compute_loss(self,clas_out,regr_out,targ_clas,targ_regr, l=1, effective_batch=50):
-            #############################
-            # TODO compute the total loss
-            #############################
-            return loss, loss_c, loss_r
+    def compute_loss(self, clas_out, regr_out, targ_clas, targ_regr, l=1, effective_batch=50):
+        #############################
+        # TODO compute the total loss
+        # Flatten the inputs
+        regr_out_flat, clas_out_flat, anch_flat = output_flattening(regr_out, clas_out, self.anchors)
+        targ_regr_flat, targ_clas_flat, _ = output_flattening(targ_regr, targ_clas, self.anchors)
+        # Check where target has positve labels
+        b = (targ_clas_flat == 1)
+        indexes_p = b.nonzero()
+        # Check where target has negative labels
+        c = (targ_clas_flat == 0)
+        indexes_n = c.nonzero()
+        p_out = 0
+        n_out = 0
+        pos_out_r = 0
+        pos_target_coord = 0
+        len_indexes_p = indexes_p.size(dim=0)
+        # Check if you have enough postive labels
+        if (len_indexes_p < (effective_batch / 2)):
+            # If not enough positive labels, then get all postive labels
+            # And sample remaining postions as negative labels
+            p_out = clas_out_flat[indexes_p]
+            pos_out_r = regr_out_flat[indexes_p, :]
+            pos_target_coord = targ_regr_flat[indexes_p, :]
+            n_indexes = torch.randperm(indexes_n.size(dim=0))[:(effective_batch - len_indexes_p)]
+            n_out = clas_out_flat[indexes_n[n_indexes]]
+        else:
+            # If yes, then sample M/2 postive labels and negative labels
+            p_indexes = torch.randperm(indexes_p.size(dim=0))[:(effective_batch / 2)]
+            p_out = clas_out_flat[indexes_p[p_indexes]]
+            pos_out_r = regr_out_flat[indexes_p[p_indexes], :]
+            pos_target_coord = targ_regr_flat[indexes_p[p_indexes], :]
+            n_indexes = torch.randperm(indexes_n.size(dim=0))[:(effective_batch / 2)]
+            n_out = clas_out_flat[indexes_n[n_indexes]]
+        loss_c = self.loss_class(p_out, n_out)
+        loss_r = self.loss_reg(pos_target_coord, pos_out_r)
+        loss = loss_c + (l * loss_r)
+        #############################
+        return loss, loss_c, loss_r
 
 
 
