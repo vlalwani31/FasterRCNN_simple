@@ -216,6 +216,32 @@ class RPNHead(torch.nn.Module):
     def postprocess(self,out_c,out_r, IOU_thresh=0.5, keep_num_preNMS=50, keep_num_postNMS=10):
        ####################################
        # TODO postprocess a batch of images
+       batch_size = out_c.shape[0]
+       # K, N = keep_num_preNMS, keep_num_postNMS
+       out_r_,out_c_,anchors_ = utils.output_flattening(out_r,out_c,self.anchor) #(bz x grid_size[0] x grid_size[1],4)
+       out_bboxes = utils.output_decoding(out_r_,anchors_) #(bz x total anchors,4)
+       img_size = (800, 1088)  # Image size
+       out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
+       out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
+       steps = out_c_.shape[0]/batch_size
+       batches = list(range(0, (out_c_.shape[0] + steps), steps))
+       nms_clas_list = []
+       nms_prebox_list = []
+       for i in range(len(batches)):
+           if i<(len(batch_size)-1):
+               sorted_indices = torch.argsort(out_c_[batches[i]:batches[i+1],:],descending=True)
+               sorted_indices = sorted_indices[:keep_num_preNMS]
+               prebox = out_bboxes[batches[i]:batches[i+1],:]
+               prebox = prebox[sorted_indices,:]
+               clas = out_c_[batches[i]:batches[i+1],:]
+               clas = clas[sorted_indices,:]
+               #apply nms
+               nms_clas,nms_prebox = NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
+               nms_prebox_list.append(nms_prebox)
+               nms_clas_list.append(nms_clas)
+           else:
+               pass
+
        #####################################
         return nms_clas_list, nms_prebox_list
 
@@ -231,6 +257,22 @@ class RPNHead(torch.nn.Module):
     def postprocessImg(self,mat_clas,mat_coord, IOU_thresh,keep_num_preNMS, keep_num_postNMS):
             ######################################
             # TODO postprocess a single image
+            out_c = mat_clas[None, :]
+            out_r = mat_coord[None, :]
+            out_r_, out_c_, anchors_ = utils.output_flattening(out_r, out_c, self.anchor)  # (bz x grid_size[0] x grid_size[1],4)
+            out_bboxes = utils.output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
+            img_size = (800, 1088)  # Image size
+            out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
+            out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
+
+            sorted_indices = torch.argsort(out_c_, descending=True)
+            sorted_indices = sorted_indices[:keep_num_preNMS]
+            prebox = out_bboxes
+            prebox = prebox[sorted_indices, :]
+            clas = out_c_
+            clas = clas[sorted_indices, :]
+            # apply nms
+            nms_clas, nms_prebox = NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
             #####################################
 
             return nms_clas, nms_prebox
@@ -243,10 +285,35 @@ class RPNHead(torch.nn.Module):
     # Output:
     #       nms_clas: (Post_NMS_boxes)
     #       nms_prebox: (Post_NMS_boxes,4)
-    def NMS(self,clas,prebox, thresh):
+    def NMS(self,clas, prebox, thresh, keep_num_postNMS):
         ##################################
-        # TODO perform NSM
+        # TODO perform NMS
+        y1 = prebox[:, 0]
+        x1 = prebox[:, 1]
+        y2 = prebox[:, 2]
+        x2 = prebox[:, 3]
+        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+        order = clas.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w = np.maximum(0.0, xx2 - xx1 + 1)
+            h = np.maximum(0.0, yy2 - yy1 + 1)
+            inter = w * h
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(ovr <= thresh)[0]
+            order = order[inds + 1]
+        keep = keep[:keep_num_postNMS]
+        nms_prebox = prebox[keep,:]
+        nms_clas = clas[keep,:]
         ##################################
-        return nms_clas,nms_prebox
+        return nms_clas, nms_prebox
     
 if __name__=="__main__":
+    # rpn = RPNHead()
+    # rpn.postprocessImg()
