@@ -103,4 +103,22 @@ def output_decoding(flatten_out,flatten_anchors, device='cpu'):
     for this it says box is same as flatten_anchors, so i am just returning:
     box = flatten_anchors
     '''
+    box = torch.ones(flatten_out.shape)
+    #print(box.shape)
+    for i in range(flatten_out.shape[0]):
+      out = flatten_out[i,:]
+      anchor = flatten_anchors[i,:]
+      tx = out[0]
+      ty = out[1]
+      tw = out[2]
+      th = out[3]
+      xa = anchor[0]
+      ya = anchor[1]
+      wa = anchor[2]
+      ha = anchor[3]
+      box_x = tx*wa + xa
+      box_y = ty*ha + ya
+      box_w = torch.exp(tw)*wa
+      box_h = torch.exp(th)*ha
+      box[i,:] = torch.tensor([box_x,box_y,box_w,box_h])
     return box
