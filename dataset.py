@@ -15,10 +15,10 @@ class BuildDataset(torch.utils.data.Dataset):
         #############################################
         # TODO Initialize  Dataset
         imgs_path, mask_path, labels_path, bounding_box_path = path
-        hf = h5py.File(imgs_path)
+        hf = h5py.File(imgs_path, 'r')
         self.imgs_data = hf.get('data')
         self.labels_data = np.load(labels_path, allow_pickle=True, encoding='latin1')
-        hf = h5py.File(mask_path)
+        hf = h5py.File(mask_path, 'r')
         self.mask_data = hf.get('data')
         self.bounding_box_data = np.load(bounding_box_path, allow_pickle=True, encoding='latin1')
         self.p1 = transforms.Compose([transforms.Resize((800,1066)), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)), transforms.Pad((11,0))])

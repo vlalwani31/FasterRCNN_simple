@@ -106,9 +106,9 @@ class RPNHead(torch.nn.Module):
         ######################################
         # TODO create anchors
         r,c = grid_sizes
-        x_vals = int((torch.arange(c) * stride) + (stride / 2))
-        y_vals = int((torch.arange(r) * stride) + (stride / 2))
-        w_decoded = torch.sqrt(aspect_ratio * scale * scale).item()
+        x_vals = (torch.arange(c) * stride) + (stride / 2)
+        y_vals = (torch.arange(r) * stride) + (stride / 2)
+        w_decoded = torch.sqrt(torch.tensor(aspect_ratio * scale * scale)).item()
         h_decoded = w_decoded / aspect_ratio
         anchors = torch.zeros(r, c, 4)
         for i in range(r):
@@ -145,7 +145,7 @@ class RPNHead(torch.nn.Module):
         g_class_list = []
         g_coord_list = []
         for i in range(len(indexes)):
-            cl_out, co_out = create_ground_truth(bboxes_list[i], indexes[i], self.anchors_param['grid_size'], self.anchors, image_shape)
+            cl_out, co_out = self.create_ground_truth(bboxes_list[i], indexes[i], self.anchors_param['grid_size'], self.anchors, image_shape)
             g_class_list.append(cl_out)
             g_coord_list.append(co_out)
         ground_clas = torch.stack(g_class_list, dim = 0)
@@ -179,7 +179,7 @@ class RPNHead(torch.nn.Module):
         ground_coord = torch.zeros(4,grid_size[0],grid_size[1])
         # iou_results = torch.zeros(grid_size[0], grid_size[1], len(bboxes))
         anch = anchors.view(-1,4)
-        t_bboxes = torch.tensor(bboxes)
+        t_bboxes = bboxes.clone().detach()
         y_b_1 = t_bboxes[:,0]
         y_b_2 = t_bboxes[:,2]
         x_b_1 = t_bboxes[:,1]
@@ -197,10 +197,17 @@ class RPNHead(torch.nn.Module):
         ground_clas[0,max_vals < 0.3] = 0
         a = max_vals > 0.7
         ground_clas[0,a] = 1
-        ground_coord[0,a] = (t_bboxes(max_ind[a],0) - anchors(a,0)) / anchors(a,2)
-        ground_coord[1,a] = (t_bboxes(max_ind[a],1) - anchors(a,1)) / anchors(a,3)
-        ground_coord[2,a] = torch.log(t_bboxes(max_ind[a],2)) - torch.log(anchors(a,2))
-        ground_coord[3,a] = torch.log(t_bboxes(max_ind[a],3)) - torch.log(anchors(a,3))
+        print(a.shape)
+        print(ground_coord[0,a].shape)
+        print(t_bboxes.shape)
+        print(max_ind[a].shape)
+        print(t_bboxes[max_ind[a],0].shape)
+        print(anchors.shape)
+        print(anchors[a,:])
+        ground_coord[0,a] = (t_bboxes[max_ind[a],0] - anchors[a,0]) / anchors[a,2]
+        ground_coord[1,a] = (t_bboxes[max_ind[a],1] - anchors[a,1]) / anchors[a,3]
+        ground_coord[2,a] = torch.log(t_bboxes[max_ind[a],2]) - torch.log(anchors[a,2])
+        ground_coord[3,a] = torch.log(t_bboxes[max_ind[a],3]) - torch.log(anchors[a,3])
 
         #####################################################
 
@@ -309,8 +316,34 @@ class RPNHead(torch.nn.Module):
     def postprocess(self,out_c,out_r, IOU_thresh=0.5, keep_num_preNMS=50, keep_num_postNMS=10):
        ####################################
        # TODO postprocess a batch of images
+       batch_size = out_c.shape[0]
+       # K, N = keep_num_preNMS, keep_num_postNMS
+       out_r_,out_c_,anchors_ = utils.output_flattening(out_r,out_c,self.anchor) #(bz x grid_size[0] x grid_size[1],4)
+       out_bboxes = utils.output_decoding(out_r_,anchors_) #(bz x total anchors,4)
+       img_size = (800, 1088)  # Image size
+       out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
+       out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
+       steps = out_c_.shape[0]/batch_size
+       batches = list(range(0, (out_c_.shape[0] + steps), steps))
+       nms_clas_list = []
+       nms_prebox_list = []
+       for i in range(len(batches)):
+           if i<(len(batch_size)-1):
+               sorted_indices = torch.argsort(out_c_[batches[i]:batches[i+1],:],descending=True)
+               sorted_indices = sorted_indices[:keep_num_preNMS]
+               prebox = out_bboxes[batches[i]:batches[i+1],:]
+               prebox = prebox[sorted_indices,:]
+               clas = out_c_[batches[i]:batches[i+1],:]
+               clas = clas[sorted_indices,:]
+               #apply nms
+               nms_clas,nms_prebox = NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
+               nms_prebox_list.append(nms_prebox)
+               nms_clas_list.append(nms_clas)
+           else:
+               pass
+
        #####################################
-        return nms_clas_list, nms_prebox_list
+       return nms_clas_list, nms_prebox_list
 
 
 
@@ -324,6 +357,22 @@ class RPNHead(torch.nn.Module):
     def postprocessImg(self,mat_clas,mat_coord, IOU_thresh,keep_num_preNMS, keep_num_postNMS):
             ######################################
             # TODO postprocess a single image
+            out_c = mat_clas[None, :]
+            out_r = mat_coord[None, :]
+            out_r_, out_c_, anchors_ = utils.output_flattening(out_r, out_c, self.anchor)  # (bz x grid_size[0] x grid_size[1],4)
+            out_bboxes = utils.output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
+            img_size = (800, 1088)  # Image size
+            out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
+            out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
+
+            sorted_indices = torch.argsort(out_c_, descending=True)
+            sorted_indices = sorted_indices[:keep_num_preNMS]
+            prebox = out_bboxes
+            prebox = prebox[sorted_indices, :]
+            clas = out_c_
+            clas = clas[sorted_indices, :]
+            # apply nms
+            nms_clas, nms_prebox = NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
             #####################################
 
             return nms_clas, nms_prebox
@@ -336,10 +385,33 @@ class RPNHead(torch.nn.Module):
     # Output:
     #       nms_clas: (Post_NMS_boxes)
     #       nms_prebox: (Post_NMS_boxes,4)
-    def NMS(self,clas,prebox, thresh):
+    def NMS(self,clas, prebox, thresh, keep_num_postNMS):
         ##################################
-        # TODO perform NSM
+        # TODO perform NMS
+        y1 = prebox[:, 0]
+        x1 = prebox[:, 1]
+        y2 = prebox[:, 2]
+        x2 = prebox[:, 3]
+        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+        order = clas.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w = np.maximum(0.0, xx2 - xx1 + 1)
+            h = np.maximum(0.0, yy2 - yy1 + 1)
+            inter = w * h
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(ovr <= thresh)[0]
+            order = order[inds + 1]
+        keep = keep[:keep_num_postNMS]
+        nms_prebox = prebox[keep,:]
+        nms_clas = clas[keep,:]
         ##################################
-        return nms_clas,nms_prebox
+        return nms_clas, nms_prebox
 
-if __name__=="__main__":
+# if __name__=="__main__":
