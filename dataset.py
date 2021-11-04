@@ -10,6 +10,7 @@ from rpn import *
 import matplotlib.patches as patches
 import seaborn as sb
 import statistics
+import os
 
 
 class BuildDataset(torch.utils.data.Dataset):
@@ -218,6 +219,15 @@ def visualize(image,label,mask,bounding_box, index):
   plt.imshow(torch.moveaxis(img, 0, -1))
   plt.savefig('./vis' + str(index[0]) + '.png')
 
+def plot_fn(data,title,x_label,y_label, nam):
+
+  plt.figure(figsize=(7,7))
+  plt.plot(range(len(data)),data)
+  plt.xlabel(x_label)
+  plt.ylabel(y_label)
+  plt.title(title)
+  plt.savefig('./' + nam + '.png')
+
 if __name__ == '__main__':
     # file path and make a list
     imgs_path = './data/hw3_mycocodata_img_comp_zlib.h5'
@@ -228,32 +238,32 @@ if __name__ == '__main__':
     # load the data into data.Dataset
     dataset = BuildDataset(paths)
     # Get Histogram
-    # asp_hist = []
-    # sca_hist = []
-    # for i in range(len(dataset)):
-    #     b = dataset.get_bbox(i)
-    #     # print(b)
-    #     w = b[:,3] - b[:,1]
-    #     h = b[:,2] - b[:,0]
-    #     asp = w / h
-    #     sca = torch.sqrt(w * h)
-    #     for j in range(b.size(dim=0)):
-    #         asp_hist.append(asp[j].item())
-    #         sca_hist.append(sca[j].item())
-    # print("Aspect Ratio: ", statistics.median(asp_hist))
-    # plt.figure(figsize=(7,7))
-    # plt.hist(asp_hist, bins=30)
-    # plt.xlabel('Aspect Ratio')
-    # plt.ylabel('Frequency')
-    # plt.title('Aspect Ratio Histogram')
-    # plt.savefig('./histogram_Aspect.png')
-    # print("Scale: ", statistics.median(sca_hist))
-    # plt.figure(figsize=(7,7))
-    # plt.hist(sca_hist, bins=30)
-    # plt.xlabel('Scale')
-    # plt.ylabel('Frequency')
-    # plt.title('Scale Histogram')
-    # plt.savefig('./histogram_Scale.png')
+    asp_hist = []
+    sca_hist = []
+    for i in range(len(dataset)):
+        b = dataset.get_bbox(i)
+        # print(b)
+        w = b[:,3] - b[:,1]
+        h = b[:,2] - b[:,0]
+        asp = w / h
+        sca = torch.sqrt(w * h)
+        for j in range(b.size(dim=0)):
+            asp_hist.append(asp[j].item())
+            sca_hist.append(sca[j].item())
+    print("Aspect Ratio: ", statistics.median(asp_hist))
+    plt.figure(figsize=(7,7))
+    plt.hist(asp_hist, bins=30)
+    plt.xlabel('Aspect Ratio')
+    plt.ylabel('Frequency')
+    plt.title('Aspect Ratio Histogram')
+    plt.savefig('./histogram_Aspect.png')
+    print("Scale: ", statistics.median(sca_hist))
+    plt.figure(figsize=(7,7))
+    plt.hist(sca_hist, bins=30)
+    plt.xlabel('Scale')
+    plt.ylabel('Frequency')
+    plt.title('Scale Histogram')
+    plt.savefig('./histogram_Scale.png')
 
 
     # build the dataloader
@@ -269,7 +279,7 @@ if __name__ == '__main__':
 
     # train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
     # test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
-    batch_size = 1
+    batch_size = 4
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -286,16 +296,11 @@ if __name__ == '__main__':
         visualize(images,labels,masks, boxes, indexes)
 
     for i,batch in enumerate(train_loader,0):
-    # for i,batch in enumerate(index_set,0):
         if(i>4):
             break
         images=batch['images'][0,:,:,:]
         indexes=batch['index']
         boxes=batch['bbox']
-        # ba = train_build_loader.collect_fn([dataset[batch]])
-        # images=ba['images'][0,:,:,:]
-        # indexes=ba['index']
-        # boxes=ba['bbox']
         gt,ground_coord=rpn_net.create_batch_truth(boxes,indexes,images.shape[-2:])
         # print("Indexes: ", indexes)
         # heat_map = sb.heatmap(gt.squeeze(0).squeeze(0))
@@ -333,3 +338,140 @@ if __name__ == '__main__':
             ax.add_patch(rect)
 
         plt.savefig('./gt' + str(i) + '.png')
+
+    # Code for Training
+    training_loss_total = []
+    training_loss_r = []
+    training_loss_c = []
+    validation_loss_total = []
+    validation_loss_r = []
+    validation_loss_c = []
+    model_path = 'model.pth'
+    final_items = [i for i in os.listdir('./') if 'model' in i]
+    if (model_path in final_items):
+        rpn_net.eval().load_state_dict(torch.load(model_path, map_location='cpu'))
+    else:
+        optimizer = torch.optim.Adam(rpn_net.parameters())
+        epochs = 10
+        for i in range(epochs):
+            # Training Time
+            loss_t_list = []
+            loss_c_list = []
+            loss_r_list = []
+            for j,batch in enumerate(train_loader,0):
+                images=batch['images']
+                indexes=batch['index']
+                boxes=batch['bbox']
+                masks = batch['masks']
+                labels = batch['labels']
+                optimizer.zero_grad()
+                gt,ground_coord=rpn_net.create_batch_truth(boxes,indexes,images.shape[-2:])
+                logits, bboxes = rpn_net(images)
+                loss_t, loss_c, loss_r = rpn_net.compute_loss(logits, bboxes, gt, ground_coord)
+                loss_t_list.append(loss_t)
+                loss_c_list.append(loss_c)
+                loss_r_list.append(loss_r)
+                loss_t.backward()
+                optimizer.step()
+                print("Epoch: ", i, " Batch: ", j)
+            training_loss_total.append(sum(loss_t_list) / len(loss_t_list))
+            training_loss_c.append(sum(loss_c_list) / len(loss_c_list))
+            training_loss_r.append(sum(loss_r_list) / len(loss_r_list))
+            # Validation Time
+            loss_t_list = []
+            loss_c_list = []
+            loss_r_list = []
+            with torch.no_grad():
+                for j,batch in enumerate(test_loader,0):
+                    images=batch['images']
+                    indexes=batch['index']
+                    boxes=batch['bbox']
+                    masks = batch['masks']
+                    labels = batch['labels']
+                    gt,ground_coord=rpn_net.create_batch_truth(boxes,indexes,images.shape[-2:])
+                    logits, bboxes = rpn_net(images)
+                    loss_t, loss_c, loss_r = rpn_net.compute_loss(logits, bboxes, gt, ground_coord)
+                    loss_t_list.append(loss_t)
+                    loss_c_list.append(loss_c)
+                    loss_r_list.append(loss_r)
+                validation_loss_total.append(sum(loss_t_list) / len(loss_t_list))
+                validation_loss_c.append(sum(loss_c_list) / len(loss_c_list))
+                validation_loss_r.append(sum(loss_r_list) / len(loss_r_list))
+        plot_fn(training_loss_total,'Training Loss Total','Epoch','Total Loss', 'tlt')
+        plot_fn(training_loss_c,'Training Loss Class','Epoch','Loss Class','tlc')
+        plot_fn(training_loss_r,'Training Loss Regressor','Epoch','Loss Regr','tlr')
+        plot_fn(validation_loss_total,'Validation Loss Total','Epoch','Total Loss','vlt')
+        plot_fn(validation_loss_c,'Validation Loss Class','Epoch','Loss Class', 'vlc')
+        plot_fn(validation_loss_r,'Validation Loss Regressor','Epoch','Loss Regr', 'vlr')
+        torch.save(rpn_net.state_dict(), 'model.pth')
+    with torch.no_grad():
+        correct = 0
+        total_len_gt = 0
+        for j,batch in enumerate(test_loader,0):
+            images=batch['images']
+            indexes=batch['index']
+            boxes=batch['bbox']
+            masks = batch['masks']
+            labels = batch['labels']
+            gt,ground_coord=rpn_net.create_batch_truth(boxes,indexes,images.shape[-2:])
+            logits, bboxes = rpn_net(images)
+            gt = gt.view(-1)
+            logits = logits.view(-1)
+            total_len_gt += gt.shape[0]
+            for k in range(gt.shape[0]):
+                if ((gt[k] == 1) and (logits[k] > 0.5)):
+                    correct += 1
+                elif ((gt[k] == 0) and (logits[k] <= 0.5)):
+                    correct += 1
+        print("Point Wise Accuracy: ", correct * 100 / total_len_gt)
+        index_set = (56, 69, 572, 3081)
+        # Top 20 Proposals
+        for i,batch in enumerate(index_set,0):
+            ba = train_build_loader.collect_fn([dataset[batch]])
+            images=ba['images']
+            logits, bboxes = rpn_net(images)
+            flatten_bbox,flatten_logit,flatten_anchors=output_flattening(bboxes, logits, rpn_net.get_anchors())
+            decoded_coord=output_decoding(flatten_bbox,flatten_anchors)
+            sorted_indices = torch.argsort(flatten_logit, descending=True)
+            len_ind = sorted_indices.shape[0]
+            if len_ind > 20:
+                sorted_indices = sorted_indices[:20]
+            # Plot the image and the anchor boxes with the positive labels and their corresponding ground truth box
+            images = images[0,:,:,:]
+            images = transforms.functional.normalize(images, [-0.485/0.229, -0.456/0.224, -0.406/0.225], [1/0.229, 1/0.224, 1/0.225], inplace=False)
+            fig,ax=plt.subplots(1,1)
+            ax.imshow(images.permute(1,2,0))
+            for elem in sorted_indices:
+                coord=decoded_coord[elem,:].view(-1)
+                col='r'
+                rect=patches.Rectangle((coord[0],coord[1]),coord[2]-coord[0],coord[3]-coord[1],fill=False,color=col)
+                ax.add_patch(rect)
+            plt.savefig('./top20props' + str(i) + '.png')
+        # Before and After NMS
+        for i,batch in enumerate(index_set,0):
+            ba = train_build_loader.collect_fn([dataset[batch]])
+            images=ba['images']
+            logits, bboxes = rpn_net(images)
+            flatten_bbox,flatten_logit,flatten_anchors=output_flattening(bboxes, logits, rpn_net.get_anchors())
+            decoded_coord=output_decoding(flatten_bbox,flatten_anchors)
+            images = images[0,:,:,:]
+            fig,ax=plt.subplots(1,1)
+            ax.imshow(images.permute(1,2,0))
+            plt.title("Before NMS")
+            find_cor = (flatten_logit > 0.5).nonzero()
+            for elem in find_cor:
+                coord=decoded_coord[elem,:].view(-1)
+                col='r'
+                rect=patches.Rectangle((coord[0],coord[1]),coord[2]-coord[0],coord[3]-coord[1],fill=False,color=col)
+                ax.add_patch(rect)
+            plt.savefig('./beforeNMS' + str(i) + '.png')
+            nms_c, nms_bbox = rpn_net.postprocessImg(logits.squeeze(0), bboxes.squeeze(0), 0.5, 50, 10)
+            fig,ax=plt.subplots(1,1)
+            ax.imshow(images.permute(1,2,0))
+            plt.title("After NMS")
+            for elem in range(nms_c.shape[0]):
+                coord=nms_bbox[elem,:].view(-1)
+                col='r'
+                rect=patches.Rectangle((coord[0],coord[1]),coord[2]-coord[0],coord[3]-coord[1],fill=False,color=col)
+                ax.add_patch(rect)
+            plt.savefig('./afterNMS' + str(i) + '.png')

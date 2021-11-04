@@ -79,7 +79,7 @@ def output_flattening(out_r,out_c,anchors):
     '''
 
     assert(out_r.shape[0] != out_c.shape[0],"bz is different for row and column")
-    flatten_regr = out_r.moveaxis(1,3).view(-1,4)
+    flatten_regr = out_r.moveaxis(1,3).reshape(-1,4)
     flatten_clas = out_c.view(-1)
     flatten_anchors = anchors.view(-1,4)
 

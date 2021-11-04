@@ -175,7 +175,7 @@ class RPNHead(torch.nn.Module):
 
         #####################################################
         # TODO create ground truth for a single image
-        print(bboxes)
+        # print(bboxes)
         ground_clas = torch.zeros(1, grid_size[0], grid_size[1]) + 0.5
         ground_coord = torch.zeros(4,grid_size[0],grid_size[1])
         anch = anchors.view(-1,4)
@@ -268,7 +268,7 @@ class RPNHead(torch.nn.Module):
     def loss_reg(self, pos_target_coord, pos_out_r):
         #torch.nn.SmoothL1Loss()
         # TODO compute regressor's loss
-        criterion = torch.nn.BCELoss()
+        criterion = torch.nn.SmoothL1Loss()
         loss = criterion(pos_out_r, pos_target_coord)
         return loss
 
@@ -286,6 +286,7 @@ class RPNHead(torch.nn.Module):
         #############################
         # TODO compute the total loss
         # Flatten the inputs
+        # print(regr_out.shape)
         regr_out_flat, clas_out_flat, anch_flat = output_flattening(regr_out, clas_out, self.anchors)
         targ_regr_flat, targ_clas_flat, _ = output_flattening(targ_regr, targ_clas, self.anchors)
         # Check where target has positve labels
@@ -306,15 +307,15 @@ class RPNHead(torch.nn.Module):
             p_out = clas_out_flat[indexes_p]
             pos_out_r = regr_out_flat[indexes_p, :]
             pos_target_coord = targ_regr_flat[indexes_p, :]
-            n_indexes = torch.randperm(indexes_n.size(dim=0))[:(effective_batch - len_indexes_p)]
+            n_indexes = torch.randperm(indexes_n.size(dim=0))[:int(effective_batch - len_indexes_p)]
             n_out = clas_out_flat[indexes_n[n_indexes]]
         else:
             # If yes, then sample M/2 postive labels and negative labels
-            p_indexes = torch.randperm(indexes_p.size(dim=0))[:(effective_batch / 2)]
+            p_indexes = torch.randperm(indexes_p.size(dim=0))[:int(effective_batch / 2)]
             p_out = clas_out_flat[indexes_p[p_indexes]]
             pos_out_r = regr_out_flat[indexes_p[p_indexes], :]
             pos_target_coord = targ_regr_flat[indexes_p[p_indexes], :]
-            n_indexes = torch.randperm(indexes_n.size(dim=0))[:(effective_batch / 2)]
+            n_indexes = torch.randperm(indexes_n.size(dim=0))[:int(effective_batch / 2)]
             n_out = clas_out_flat[indexes_n[n_indexes]]
         loss_c = self.loss_class(p_out, n_out)
         loss_r = self.loss_reg(pos_target_coord, pos_out_r)
@@ -339,17 +340,18 @@ class RPNHead(torch.nn.Module):
        # TODO postprocess a batch of images
        batch_size = out_c.shape[0]
        # K, N = keep_num_preNMS, keep_num_postNMS
-       out_r_,out_c_,anchors_ = utils.output_flattening(out_r,out_c,self.anchor) #(bz x grid_size[0] x grid_size[1],4)
-       out_bboxes = utils.output_decoding(out_r_,anchors_) #(bz x total anchors,4)
+       out_r_,out_c_,anchors_ = output_flattening(out_r,out_c,self.anchors) #(bz x grid_size[0] x grid_size[1],4)
+       out_bboxes = output_decoding(out_r_,anchors_) #(bz x total anchors,4)
        img_size = (800, 1088)  # Image size
        out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
        out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
-       steps = out_c_.shape[0]/batch_size
+       steps = int(out_c_.shape[0]/batch_size)
        batches = list(range(0, (out_c_.shape[0] + steps), steps))
        nms_clas_list = []
        nms_prebox_list = []
+       len_batches = len(batches)
        for i in range(len(batches)):
-           if i<(len(batch_size)-1):
+           if i<(len_batches-1):
                sorted_indices = torch.argsort(out_c_[batches[i]:batches[i+1],:],descending=True)
                sorted_indices = sorted_indices[:keep_num_preNMS]
                prebox = out_bboxes[batches[i]:batches[i+1],:]
@@ -380,8 +382,8 @@ class RPNHead(torch.nn.Module):
             # TODO postprocess a single image
             out_c = mat_clas[None, :]
             out_r = mat_coord[None, :]
-            out_r_, out_c_, anchors_ = utils.output_flattening(out_r, out_c, self.anchor)  # (bz x grid_size[0] x grid_size[1],4)
-            out_bboxes = utils.output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
+            out_r_, out_c_, anchors_ = output_flattening(out_r, out_c, self.anchors)  # (bz x grid_size[0] x grid_size[1],4)
+            out_bboxes = output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
             img_size = (800, 1088)  # Image size
             out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
             out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
@@ -391,9 +393,11 @@ class RPNHead(torch.nn.Module):
             prebox = out_bboxes
             prebox = prebox[sorted_indices, :]
             clas = out_c_
-            clas = clas[sorted_indices, :]
+            # print(clas.shape)
+            # print(sorted_indices)
+            clas = clas[sorted_indices]
             # apply nms
-            nms_clas, nms_prebox = NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
+            nms_clas, nms_prebox = self.NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
             #####################################
 
             return nms_clas, nms_prebox
@@ -414,24 +418,45 @@ class RPNHead(torch.nn.Module):
         y2 = prebox[:, 2]
         x2 = prebox[:, 3]
         areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-        order = clas.argsort()[::-1]
+        order = torch.argsort(clas, descending=True)
         keep = []
-        while order.size > 0:
-            i = order[0]
-            keep.append(i)
-            xx1 = np.maximum(x1[i], x1[order[1:]])
-            yy1 = np.maximum(y1[i], y1[order[1:]])
-            xx2 = np.minimum(x2[i], x2[order[1:]])
-            yy2 = np.minimum(y2[i], y2[order[1:]])
-            w = np.maximum(0.0, xx2 - xx1 + 1)
-            h = np.maximum(0.0, yy2 - yy1 + 1)
-            inter = w * h
-            ovr = inter / (areas[i] + areas[order[1:]] - inter)
-            inds = np.where(ovr <= thresh)[0]
-            order = order[inds + 1]
+        # while order.shape[0] > 0:
+        #     i = order[0]
+        #     keep.append(i)
+        #     xx1 = np.maximum(x1[i], x1[order[1:]])
+        #     yy1 = np.maximum(y1[i], y1[order[1:]])
+        #     xx2 = np.minimum(x2[i], x2[order[1:]])
+        #     yy2 = np.minimum(y2[i], y2[order[1:]])
+        #     w = np.maximum(0.0, xx2 - xx1 + 1)
+        #     h = np.maximum(0.0, yy2 - yy1 + 1)
+        #     inter = w * h
+        #     ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        #     inds = np.where(ovr <= thresh)[0]
+        #     order = order[(inds + 1)]
+        for i in range(order.shape[0]):
+            if len(keep) == 0:
+                keep.append(order[i].item())
+            else:
+                checker = False
+                for j in range(len(keep)):
+                    xx1 = np.maximum(x1[order[i]], x1[keep[j]])
+                    yy1 = np.maximum(y1[order[i]], y1[keep[j]])
+                    xx2 = np.minimum(x2[order[i]], x2[keep[j]])
+                    yy2 = np.minimum(y2[order[i]], y2[keep[j]])
+                    w = np.maximum(0.0, xx2 - xx1 + 1)
+                    h = np.maximum(0.0, yy2 - yy1 + 1)
+                    inter = w * h
+                    ovr = inter / (areas[order[i]] + areas[keep[j]] - inter)
+                    if ovr > thresh:
+                        checker = True
+                        break
+                if checker == False:
+                    keep.append(order[i].item())
         keep = keep[:keep_num_postNMS]
         nms_prebox = prebox[keep,:]
-        nms_clas = clas[keep,:]
+        nms_clas = clas[keep]
+        # print(nms_clas.shape[0])
+        # print(nms_prebox)
         ##################################
         return nms_clas, nms_prebox
 
