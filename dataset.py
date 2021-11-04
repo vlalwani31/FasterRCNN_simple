@@ -8,6 +8,8 @@ from utils import *
 import matplotlib.pyplot as plt
 from rpn import *
 import matplotlib.patches as patches
+import seaborn as sb
+import statistics
 
 
 class BuildDataset(torch.utils.data.Dataset):
@@ -53,6 +55,21 @@ class BuildDataset(torch.utils.data.Dataset):
 
         return transed_img, label, transed_mask, transed_bbox, index
 
+    def get_bbox(self, index):
+        bbox = torch.tensor(self.bounding_box_data[index], dtype = torch.float)
+        multip = torch.ones_like(bbox)
+        multip[:,0] = 8/3   # Y1 scaling
+        multip[:,1] = 2.665 # X1 scaling
+        multip[:,2] = 8/3   # Y2 scaling
+        multip[:,3] = 2.665 # X3 scaling
+        bbox = (bbox * multip).int()
+        multip = torch.zeros_like(bbox)
+        multip[:,0] = 0  # Y1 padding
+        multip[:,1] = 11 # X1 padding
+        multip[:,2] = 0  # Y2 padding
+        multip[:,3] = 11 # X2 padding
+        bbox = bbox + multip
+        return bbox
 
 
     # This function preprocess the given image, mask, box by rescaling them appropriately
@@ -70,16 +87,16 @@ class BuildDataset(torch.utils.data.Dataset):
         img = self.p1(img.unsqueeze(0))
         mask = self.p2(mask.unsqueeze(0))
         multip = torch.ones_like(bbox)
-        multip[:,0] = 8/3   # Y1 scaling
-        multip[:,1] = 2.665 # X1 scaling
-        multip[:,2] = 8/3   # Y2 scaling
-        multip[:,3] = 2.665 # X3 scaling
+        multip[:,0] = 2.665 # Y1 scaling
+        multip[:,1] = 8/3   # X1 scaling
+        multip[:,2] = 2.665 # Y2 scaling
+        multip[:,3] = 8/3   # X3 scaling
         bbox = (bbox * multip).int()
         multip = torch.zeros_like(bbox)
-        multip[:,0] = 0  # Y1 padding
-        multip[:,1] = 11 # X1 padding
-        multip[:,2] = 0  # Y2 padding
-        multip[:,3] = 11 # X2 padding
+        multip[:,0] = 11  # Y1 padding
+        multip[:,1] = 0 # X1 padding
+        multip[:,2] = 11  # Y2 padding
+        multip[:,3] = 0 # X2 padding
         bbox = bbox + multip
         ######################################
 
@@ -133,6 +150,73 @@ class BuildDataLoader(torch.utils.data.DataLoader):
                           num_workers=self.num_workers,
                           collate_fn=self.collect_fn)
 
+def visualize(image,label,mask,bounding_box, index):
+  img = torch.clamp(image,min=0,max=1)
+  e,r,c = img.shape
+  for j in range(len(label)):
+    # Make Bounding Box
+    if (len(bounding_box) != 0):
+      y_1 = int(bounding_box[0][j][0])
+      x_1 = int(bounding_box[0][j][1])
+      y_2 = int(bounding_box[0][j][2])
+      x_2 = int(bounding_box[0][j][3])
+
+      if x_1 < 0:
+        x_1 = 0
+      if x_1 >= r:
+        x_1 = r-1
+
+      if x_2 < 0:
+        x_2 = 0
+      if x_2 >= r:
+        x_2 = r-1
+
+      if y_1 < 0:
+        y_1 = 0
+      if y_1 >= c:
+        y_1 = c-1
+
+      if y_2 < 0:
+        y_2 = 0
+      if y_2 >= c:
+        y_2 = c-1
+
+      #Red image
+      img[0,x_1:x_2,y_1] = 1
+      img[0,x_1, y_1:y_2] = 1
+      img[0,x_2, y_1:y_2] = 1
+      img[0,x_1:x_2, y_2] = 1
+
+      #Zeroing Green image
+      img[1,x_1:x_2,y_1] = 0
+      img[1,x_1, y_1:y_2] = 0
+      img[1,x_2, y_1:y_2] = 0
+      img[1,x_1:x_2, y_2] = 0
+
+      #Zeroing Blue image
+      img[2,x_1:x_2,y_1] = 0
+      img[2,x_1, y_1:y_2] = 0
+      img[2,x_2, y_1:y_2] = 0
+      img[2,x_1:x_2, y_2] = 0
+    # Make Mask
+    for i in range(r):
+      for k in range(c):
+        if (mask[0][j,i,k] != 0):
+          if (label[0][j] == 1):
+            img[0,i,k] = 0.25 + (0.75 * img[0,i,k])
+            img[1,i,k] = 0
+            img[2,i,k] = 0
+          elif (label[0][j] == 2):
+            img[0,i,k] = 0
+            img[1,i,k] = 0.25 + (0.75 * img[1,i,k])
+            img[2,i,k] = 0
+          else:
+            img[0,i,k] = 0
+            img[1,i,k] = 0
+            img[2,i,k] = 0.25 + (0.75 * img[2,i,k])
+  plt.figure(figsize=(7,7))
+  plt.imshow(torch.moveaxis(img, 0, -1))
+  plt.savefig('./vis' + str(index[0]) + '.png')
 
 if __name__ == '__main__':
     # file path and make a list
@@ -143,6 +227,33 @@ if __name__ == '__main__':
     paths = [imgs_path, masks_path, labels_path, bboxes_path]
     # load the data into data.Dataset
     dataset = BuildDataset(paths)
+    # Get Histogram
+    # asp_hist = []
+    # sca_hist = []
+    # for i in range(len(dataset)):
+    #     b = dataset.get_bbox(i)
+    #     # print(b)
+    #     w = b[:,3] - b[:,1]
+    #     h = b[:,2] - b[:,0]
+    #     asp = w / h
+    #     sca = torch.sqrt(w * h)
+    #     for j in range(b.size(dim=0)):
+    #         asp_hist.append(asp[j].item())
+    #         sca_hist.append(sca[j].item())
+    # print("Aspect Ratio: ", statistics.median(asp_hist))
+    # plt.figure(figsize=(7,7))
+    # plt.hist(asp_hist, bins=30)
+    # plt.xlabel('Aspect Ratio')
+    # plt.ylabel('Frequency')
+    # plt.title('Aspect Ratio Histogram')
+    # plt.savefig('./histogram_Aspect.png')
+    # print("Scale: ", statistics.median(sca_hist))
+    # plt.figure(figsize=(7,7))
+    # plt.hist(sca_hist, bins=30)
+    # plt.xlabel('Scale')
+    # plt.ylabel('Frequency')
+    # plt.title('Scale Histogram')
+    # plt.savefig('./histogram_Scale.png')
 
 
     # build the dataloader
@@ -163,12 +274,35 @@ if __name__ == '__main__':
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = test_build_loader.loader()
+    index_set = (56, 69, 572, 3081)
+    for i,batch in enumerate(index_set,0):
+        ba = train_build_loader.collect_fn([dataset[batch]])
+        images=ba['images'][0,:,:,:]
+        indexes=ba['index']
+        boxes=ba['bbox']
+        masks = ba['masks']
+        labels = ba['labels']
+        images = transforms.functional.normalize(images, [-0.485/0.229, -0.456/0.224, -0.406/0.225], [1/0.229, 1/0.224, 1/0.225], inplace=False)
+        visualize(images,labels,masks, boxes, indexes)
 
     for i,batch in enumerate(train_loader,0):
+    # for i,batch in enumerate(index_set,0):
+        if(i>4):
+            break
         images=batch['images'][0,:,:,:]
         indexes=batch['index']
         boxes=batch['bbox']
+        # ba = train_build_loader.collect_fn([dataset[batch]])
+        # images=ba['images'][0,:,:,:]
+        # indexes=ba['index']
+        # boxes=ba['bbox']
         gt,ground_coord=rpn_net.create_batch_truth(boxes,indexes,images.shape[-2:])
+        # print("Indexes: ", indexes)
+        # heat_map = sb.heatmap(gt.squeeze(0).squeeze(0))
+        # plt.xlabel("Grid Column")
+        # plt.ylabel("Grid Row")
+        # plt.title("Heatmap")
+        # plt.show()
 
 
         # Flatten the ground truth and the anchors
@@ -185,19 +319,17 @@ if __name__ == '__main__':
         ax.imshow(images.permute(1,2,0))
 
         find_cor=(flatten_gt==1).nonzero()
-        find_neg=(flatten_gt==-1).nonzero()
+        find_neg=(flatten_gt==0).nonzero()
 
         for elem in find_cor:
             coord=decoded_coord[elem,:].view(-1)
             anchor=flatten_anchors[elem,:].view(-1)
 
             col='r'
+            # print("coordinates: ", coord[0], coord[1], coord[2], coord[3])
             rect=patches.Rectangle((coord[0],coord[1]),coord[2]-coord[0],coord[3]-coord[1],fill=False,color=col)
             ax.add_patch(rect)
-            rect=patches.Rectangle((anchor[0]-anchor[2]/2,anchor[1]-anchor[3]/2),anchor[2],anchor[3],fill=False,color='b')
+            rect=patches.Rectangle((anchor[1]-anchor[3]/2,anchor[0]-anchor[2]/2),anchor[3],anchor[2],fill=False,color='b')
             ax.add_patch(rect)
 
-        plt.show()
-
-        if(i>20):
-            break
+        plt.savefig('./gt' + str(i) + '.png')

@@ -10,7 +10,7 @@ import torchvision
 
 class RPNHead(torch.nn.Module):
 
-    def __init__(self,  device='cuda', anchors_param=dict(ratio=0.8,scale= 256, grid_size=(50, 68), stride=16)):
+    def __init__(self,  device='cuda', anchors_param=dict(ratio=1,scale= 320, grid_size=(50, 68), stride=16)):
         # Initialize the backbone, intermediate layer clasifier and regressor heads of the RPN
         super(RPNHead,self).__init__()
 
@@ -175,39 +175,60 @@ class RPNHead(torch.nn.Module):
 
         #####################################################
         # TODO create ground truth for a single image
+        print(bboxes)
         ground_clas = torch.zeros(1, grid_size[0], grid_size[1]) + 0.5
         ground_coord = torch.zeros(4,grid_size[0],grid_size[1])
-        # iou_results = torch.zeros(grid_size[0], grid_size[1], len(bboxes))
         anch = anchors.view(-1,4)
-        t_bboxes = bboxes.clone().detach()
-        y_b_1 = t_bboxes[:,0]
-        y_b_2 = t_bboxes[:,2]
-        x_b_1 = t_bboxes[:,1]
-        x_b_2 = t_bboxes[:,3]
+        t_bboxes = torch.zeros_like(bboxes)
+        y_b_1 = bboxes[:,0]
+        y_b_2 = bboxes[:,2]
+        x_b_1 = bboxes[:,1]
+        x_b_2 = bboxes[:,3]
         t_bboxes[:,0] = (x_b_2 + x_b_1) / 2
         t_bboxes[:,1] = (y_b_2 + y_b_1) / 2
         t_bboxes[:,2] = x_b_2 - x_b_1
         t_bboxes[:,3] = y_b_2 - y_b_1
         iou_results = IOU(anch, t_bboxes)
         iou_results = iou_results.view(grid_size[0],grid_size[1], len(bboxes))
-        # for i in range(grid_size[0]):
-        #     for j in range(grid_size[1]):
-        #         iou_results[i,j,:] = torch.tensor(MultiApply(IOU, anch[i,j,:], bboxes))
         max_vals, max_ind = torch.max(iou_results, 2)
         ground_clas[0,max_vals < 0.3] = 0
         a = max_vals > 0.7
-        ground_clas[0,a] = 1
-        print(a.shape)
-        print(ground_coord[0,a].shape)
-        print(t_bboxes.shape)
-        print(max_ind[a].shape)
-        print(t_bboxes[max_ind[a],0].shape)
-        print(anchors.shape)
-        print(anchors[a,:])
-        ground_coord[0,a] = (t_bboxes[max_ind[a],0] - anchors[a,0]) / anchors[a,2]
-        ground_coord[1,a] = (t_bboxes[max_ind[a],1] - anchors[a,1]) / anchors[a,3]
-        ground_coord[2,a] = torch.log(t_bboxes[max_ind[a],2]) - torch.log(anchors[a,2])
-        ground_coord[3,a] = torch.log(t_bboxes[max_ind[a],3]) - torch.log(anchors[a,3])
+        buf1 = int(anchors[0,0,2] / (2*self.anchors_param['stride']))
+        buf2 = int(anchors[0,0,3] / (2*self.anchors_param['stride']))
+        for i in range(len(bboxes)):
+            b = torch.max(iou_results[buf1:(grid_size[0]-buf1),buf2:(grid_size[1]-buf2),i])
+            c = iou_results[:,:,i] == b
+            # a[c] = True
+            ground_clas[0, c] = 1
+            ground_coord[0,c] = (t_bboxes[i,0] - anchors[c,:][:,0]) / anchors[c,:][:,2]
+            ground_coord[1,c] = (t_bboxes[i,1] - anchors[c,:][:,1]) / anchors[c,:][:,3]
+            ground_coord[2,c] = torch.log(t_bboxes[i,2]) - torch.log(anchors[c,:][:,2])
+            ground_coord[3,c] = torch.log(t_bboxes[i,3]) - torch.log(anchors[c,:][:,3])
+        # anch_x1_check = anchors[:,:,0] - (anchors[:,:,2] / 2)
+        # anch_x2_check = anchors[:,:,0] + (anchors[:,:,2] / 2)
+        # anch_y1_check = anchors[:,:,1] - (anchors[:,:,3] / 2)
+        # anch_y2_check = anchors[:,:,1] + (anchors[:,:,3] / 2)
+        # # Remove anchors with cross boundary values
+        # print(anch_x1_check.shape)
+        # d = (anch_x1_check < 0).nonzero()
+        # print(d.shape) #or (anch_x1_check > image_size[0]) or (anch_x2_check < 0) or (anch_x2_check > image_size[0]) or (anch_y1_check < 0) or (anch_y1_check > image_size[1]) or (anch_y2_check < 0) or (anch_y2_check > image_size[1])).nonzero()
+        # a[d] = False
+        # d = (anch_x1_check > image_size[0]).nonzero()
+        # print(d.shape)
+        # a[d] = False
+        if (ground_clas[0,a].shape[0] != 0):
+            ground_clas[0,a] = 1
+            ground_coord[0,a] = (t_bboxes[max_ind[a],0] - anchors[a,:][:,0]) / anchors[a,:][:,2]
+            ground_coord[1,a] = (t_bboxes[max_ind[a],1] - anchors[a,:][:,1]) / anchors[a,:][:,3]
+            ground_coord[2,a] = torch.log(t_bboxes[max_ind[a],2]) - torch.log(anchors[a,:][:,2])
+            ground_coord[3,a] = torch.log(t_bboxes[max_ind[a],3]) - torch.log(anchors[a,:][:,3])
+
+        for i in range(grid_size[0]):
+            ground_clas[0, i, :buf2] = 0.5
+            ground_clas[0, i, (grid_size[1]-buf2+1):] = 0.5
+        for i in range(grid_size[1]):
+            ground_clas[0, :buf1, i] = 0.5
+            ground_clas[0, (grid_size[0]-buf1+1):, i] = 0.5
 
         #####################################################
 
