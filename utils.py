@@ -78,8 +78,8 @@ def output_flattening(out_r,out_c,anchors):
     does that make sense?
     '''
 
-    assert(out_r[0] != out_c[0],"bz is different for row and column")
-    flatten_regr = out_r.view(-1,4)
+    assert(out_r.shape[0] != out_c.shape[0],"bz is different for row and column")
+    flatten_regr = out_r.moveaxis(1,3).reshape(-1,4)
     flatten_clas = out_c.view(-1)
     flatten_anchors = anchors.view(-1,4)
 
@@ -91,10 +91,10 @@ def output_flattening(out_r,out_c,anchors):
 # This function decodes the output that is given in the encoded format (defined in the handout)
 # into box coordinates where it returns the upper left and lower right corner of the proposed box
 # Input:
-#       flatten_out: (total_number_of_anchors*bz,4)
-#       flatten_anchors: (total_number_of_anchors*bz,4)
+#       flatten_out: (total_number_of_anchors*bz,4) (tx,ty,tw,th)
+#       flatten_anchors: (total_number_of_anchors*bz,4)(xa,ya,wa,ha)
 # Output:
-#       box: (total_number_of_anchors*bz,4)
+#       box: (total_number_of_anchors*bz,4)(y1,x1,y2,x2)
 def output_decoding(flatten_out,flatten_anchors, device='cpu'):
     #######################################
     # TODO decode the output
@@ -120,5 +120,5 @@ def output_decoding(flatten_out,flatten_anchors, device='cpu'):
       box_y = ty*ha + ya
       box_w = torch.exp(tw)*wa
       box_h = torch.exp(th)*ha
-      box[i,:] = torch.tensor([box_x,box_y,box_w,box_h])
+      box[i,:] = torch.tensor([box_y - (box_h/2), box_x - (box_w/2), box_y + (box_h/2), box_x + (box_w/2)])
     return box
