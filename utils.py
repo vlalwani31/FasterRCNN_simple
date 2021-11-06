@@ -56,5 +56,23 @@ def IOU(boxA, boxB):
 # Output:
 #       box: (total_proposals,4) ([x1,y1,x2,y2] format)
 def output_decoding(regressed_boxes_t,flatten_proposals, device='cpu'):
-    
+    box = torch.ones(regressed_boxes.shape)
+    #print(box.shape)
+    for i in range(regressed_boxes.shape[0]):
+      regressed = regressed_boxes[i,:]
+      proposals = flatten_proposals[i,:]
+      tx = regressed[0]
+      ty = regressed[1]
+      tw = regressed[2]
+      th = regressed[3]
+      x1 = proposals[0]
+      y1 = proposals[1]
+      x2 = proposals[2]
+      y2 = proposals[3]
+      box_x = tx*x2 + x1
+      box_y = ty*y2 + y1
+      box_w = torch.exp(tw)*x2
+      box_h = torch.exp(th)*y2
+      box[i,:] = torch.tensor([box_x,box_y,box_w,box_h])
+
     return box
