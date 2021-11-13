@@ -23,8 +23,6 @@ class BoxHead(torch.nn.Module):
         '''
         proposals = list [bz=3, 200, 4]
         '''
-        idx = []
-        boxes = []
         regressor_target=[]
         labels = []
         for bz in range(len(proposals)):
@@ -76,30 +74,26 @@ class BoxHead(torch.nn.Module):
         # Here you can use torchvision.ops.RoIAlign check the docs
         #####################################
          
-        
+        feature_vectors=[]
         for bz in range(len(proposals)):
         #proposal[bz].shape = 200,4
             output = torch.zeros(proposals[bz].shape[0],256*P*P)
-            for i in range(proposals[bz].shape[0]):
-                box = proposals[bz][i,:] #these are x1,y1,x2,y2
-                w = torch.abs(box[:,0] - box[:,2])#w*
-                h = torch.abs(box[:,1] - box[:,3])#h*
-                k = 4 + torch.log2(torch.sqrt(w*h)/224) 
-                if k == 2:
-                    roi = torchvision.ops.roi_align(fpn_feat_list[0],proposals[bz],(256*P*P)) #check for fpn output ask karan
-                if k == 3:
-                    roi = torchvision.ops.roi_align(fpn_feat_list[1],proposals[bz],(256*P*P)) #check for fpn output ask karan
-                if k == 4:
-                    roi = torchvision.ops.roi_align(fpn_feat_list[2],proposals[bz],(256*P*P)) #check for fpn output ask karan
-                if k == 5:
-                    roi = torchvision.ops.roi_align(fpn_feat_list[3],proposals[bz],(256*P*P)) #check for fpn output ask karan
-                
-            #how do i make the feature_vectors to be total_proposals,
-
-        #loops thru the fpn list
-          
-                #is it by using torch.where
-                #roi = roi.append(torchvision.ops.RoIAlign(fpn_feat_list[i],proposals))
+            box = proposals[bz] #these are x1,y1,x2,y2
+            w = torch.abs(box[:,0] - box[:,2])#w* 1x200
+            h = torch.abs(box[:,1] - box[:,3])#h*
+            k = 4 + int(torch.log2(torch.sqrt(w*h)/224)) #has to be 2,3,4,5 #1x200
+            idx = [i for i in range(len(k)) if (k[i]<=5 or k[i]>=2)]
+            for i in idx:
+                if k[i] == 2:
+                    output[i,:]= torchvision.ops.roi_align(fpn_feat_list[0],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+                elif k[i] == 3:
+                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[1],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+                elif k[i] == 4:
+                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[2],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+                else:
+                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[3],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+            feature_vectors.append(output)    
+            
         return feature_vectors
 
 
@@ -203,10 +197,48 @@ class BoxHead(torch.nn.Module):
     #      loss_class: scalar
     #      loss_regr: scalar
     def compute_loss(self,class_logits, box_preds, labels, regression_targets,l=1,effective_batch=150):
-        loss_class = 
+        idx = torch.max(class_logits,1)[1]
+        box_pred_new = torch.zeros((box_preds.shape[0],4)) 
+        #class_logits_new = torch.zeros(class_logits.shape[0],1)
+    
+        for row in range(box_preds.shape[0]):
+            if idx[row]==3: 
+                box_pred_new[row,:] = box_preds[row,8:12] 
+            elif idx[row]==2: 
+                box_pred_new[row,:] = box_preds[row,4:8] 
+            elif idx[row]==1: 
+                box_pred_new[row,:] = box_preds[row,0:4] 
+            else: 
+                pass 
+        # for row in range(class_logits.shape[0]):
+        #     if idx[row]==3: 
+        #         class_logits_new[row,:] = 3
+        #     elif idx[row]==2: 
+        #         class_logits_new[row,:] = 2
+        #     elif idx[row]==1: 
+        #         class_logits_new[row,:] = 1 
+        #     else: 
+        #         pass 
+        
+        
+
+        loss_c = self.loss_class(class_logits,labels)
+        loss_r = self.loss_reg(regression_targets, box_pred_new)
+        loss = loss_c + (l * loss_r)
         return loss, loss_class, loss_regr
 
+    # Compute the loss of the classifier
+    def loss_class(self,class_logits,labels):
+        criterion = torch.nn.CrossEntropyLoss()
+        loss = criterion(class_logits,labels)
+        return loss
 
+    # Compute the loss of the regressor
+    def loss_reg(self, regression_targets, box_pred_new):
+        #torch.nn.SmoothL1Loss()
+        criterion = torch.nn.SmoothL1Loss()
+        loss = criterion(regression_targets, box_pred_new)
+        return loss
 
     # Forward the pooled feature vectors through the intermediate layer and the classifier, regressor of the box head
     # Input:
@@ -216,7 +248,19 @@ class BoxHead(torch.nn.Module):
     #                                               CrossEntropyLoss you should not pass the output through softmax here)
     #        box_pred:     (total_proposals,4*C)
     def forward(self, feature_vectors):
+        X = self.forward_backbone(X)
 
+        #TODO forward through the Intermediate layer
+        X = nn.functional.relu(self.intermediate_batch(self.intermediate(X)))
+
+        #TODO forward through the Classifier Head
+        logits = nn.functional.sigmoid(self.classifier(X))
+
+        #TODO forward through the Regressor Head
+        bbox_regs = self.regressor(X)
+
+        assert logits.shape[1:4]==(1,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
+        assert bbox_regs.shape[1:4]==(4,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
         return class_logits, box_pred
 
 if __name__ == '__main__':

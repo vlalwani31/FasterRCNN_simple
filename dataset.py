@@ -222,7 +222,7 @@ if __name__ == '__main__':
     # random split the dataset into training and testset
 
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-    rpn_net = RPNHead()
+    #rpn_net = RPNHead()
     
     batch_size = 4
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
