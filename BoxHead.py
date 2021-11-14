@@ -7,6 +7,10 @@ class BoxHead(torch.nn.Module):
     def __init__(self,Classes=3,P=7):
         self.C=Classes
         self.P=P
+        self.ff1 = nn.Linear(256 * P * P, 1024)
+        self.ff2 = nn.Linear(1024, 1024)
+        self.ff3 = nn.Linear(1024, Classes+1)
+        self.ff4 = nn.Linear(1024, 4 * Classes)
         # TODO initialize BoxHead
 
 
@@ -44,19 +48,19 @@ class BoxHead(torch.nn.Module):
             bbox_star[:,1] = (bbox[:,1] + bbox[:,3])/2 #y*
             bbox_star[:,2] = torch.abs(bbox[:,0] - bbox[:,2])#w*
             bbox_star[:,3] = torch.abs(bbox[:,1] - bbox[:,3])#h*
-            
+
             box_reg[:,0] = (proposals[:,0] + proposals[:,2])/2 #xp
             bbox_reg[:,1] = (proposals[:,1] + proposals[:,3])/2 #yp
             bbox_reg[:,2] = torch.abs(proposals[:,0] - proposals[:,2])#wp
             bbox_reg[:,3] = torch.abs(proposals[:,1] - proposals[:,3])#hp
-            
+
             regressor_p[:,0] = (box_star[:,0]-box_reg[:,0])/bbox_reg[:,2] #tx
             regressor_p[:,1] = (box_star[:,1]-box_reg[:,1])/bbox_reg[:,3]) #ty
             regressor_p[:,2] = torch.log(bbox_star[:,2]/bbox_reg[:,2])#tw
             regressor_p[:,3] = torch.log(bbox_star[:,3]/bbox_reg[:,3])#th
         regressor_target.append(regressor_p)
-        #the regressor_target is a list rather than a tensor 
-        
+        #the regressor_target is a list rather than a tensor
+
         return labels,regressor_target
 
 
@@ -73,7 +77,7 @@ class BoxHead(torch.nn.Module):
         #####################################
         # Here you can use torchvision.ops.RoIAlign check the docs
         #####################################
-         
+
         feature_vectors=[]
         for bz in range(len(proposals)):
         #proposal[bz].shape = 200,4
@@ -92,8 +96,8 @@ class BoxHead(torch.nn.Module):
                     output[i,:] = torchvision.ops.roi_align(fpn_feat_list[2],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
                 else:
                     output[i,:] = torchvision.ops.roi_align(fpn_feat_list[3],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
-            feature_vectors.append(output)    
-            
+            feature_vectors.append(output)
+
         return feature_vectors
 
 
@@ -131,7 +135,7 @@ class BoxHead(torch.nn.Module):
         # apply nms
         nms_clas, nms_prebox = self.NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
         return boxes, scores, labels
-    
+
     def NMS(self,clas, prebox, thresh, keep_num_postNMS):
         ##################################
         # TODO perform NMS
@@ -198,29 +202,29 @@ class BoxHead(torch.nn.Module):
     #      loss_regr: scalar
     def compute_loss(self,class_logits, box_preds, labels, regression_targets,l=1,effective_batch=150):
         idx = torch.max(class_logits,1)[1]
-        box_pred_new = torch.zeros((box_preds.shape[0],4)) 
+        box_pred_new = torch.zeros((box_preds.shape[0],4))
         #class_logits_new = torch.zeros(class_logits.shape[0],1)
-    
+
         for row in range(box_preds.shape[0]):
-            if idx[row]==3: 
-                box_pred_new[row,:] = box_preds[row,8:12] 
-            elif idx[row]==2: 
-                box_pred_new[row,:] = box_preds[row,4:8] 
-            elif idx[row]==1: 
-                box_pred_new[row,:] = box_preds[row,0:4] 
-            else: 
-                pass 
+            if idx[row]==3:
+                box_pred_new[row,:] = box_preds[row,8:12]
+            elif idx[row]==2:
+                box_pred_new[row,:] = box_preds[row,4:8]
+            elif idx[row]==1:
+                box_pred_new[row,:] = box_preds[row,0:4]
+            else:
+                pass
         # for row in range(class_logits.shape[0]):
-        #     if idx[row]==3: 
+        #     if idx[row]==3:
         #         class_logits_new[row,:] = 3
-        #     elif idx[row]==2: 
+        #     elif idx[row]==2:
         #         class_logits_new[row,:] = 2
-        #     elif idx[row]==1: 
-        #         class_logits_new[row,:] = 1 
-        #     else: 
-        #         pass 
-        
-        
+        #     elif idx[row]==1:
+        #         class_logits_new[row,:] = 1
+        #     else:
+        #         pass
+
+
 
         loss_c = self.loss_class(class_logits,labels)
         loss_r = self.loss_reg(regression_targets, box_pred_new)
@@ -248,19 +252,17 @@ class BoxHead(torch.nn.Module):
     #                                               CrossEntropyLoss you should not pass the output through softmax here)
     #        box_pred:     (total_proposals,4*C)
     def forward(self, feature_vectors):
-        X = self.forward_backbone(X)
 
         #TODO forward through the Intermediate layer
-        X = nn.functional.relu(self.intermediate_batch(self.intermediate(X)))
+        X = nn.functional.relu(self.ff1(feature_vectors))
+        X = nn.functional.relu(self.ff2(X))
 
         #TODO forward through the Classifier Head
-        logits = nn.functional.sigmoid(self.classifier(X))
+        class_logits = self.ff3(X)
 
         #TODO forward through the Regressor Head
-        bbox_regs = self.regressor(X)
+        box_pred = self.ff4(X)
 
-        assert logits.shape[1:4]==(1,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
-        assert bbox_regs.shape[1:4]==(4,self.anchors_param['grid_size'][0],self.anchors_param['grid_size'][1])
         return class_logits, box_pred
 
 if __name__ == '__main__':
