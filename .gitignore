@@ -8,6 +8,7 @@ env/
 *.png
 *.csv
 *.pyc
+*.pth
 
 #electronJS
 node_modules/

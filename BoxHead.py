@@ -1,3 +1,4 @@
+import torchvision
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -5,6 +6,7 @@ from utils import *
 
 class BoxHead(torch.nn.Module):
     def __init__(self,Classes=3,P=7):
+        super(BoxHead,self).__init__()
         self.C=Classes
         self.P=P
         self.ff1 = nn.Linear(256 * P * P, 1024)
@@ -30,36 +32,58 @@ class BoxHead(torch.nn.Module):
         regressor_target=[]
         labels = []
         for bz in range(len(proposals)):
-            box_star = torch.zeros(bbox[bz].shape[0],4)
-            box_reg = torch.zeros(proposals[bz].shape[0],4)
-            regressor_p = torch.zeros(proposals[bz].shape[0],4)
-            labels_p = torch.zeros(proposals[bz].shape[0],1)
+            # labels_p = torch.zeros(proposals[bz].shape[0],1)
             #number of proposals in the same image so the rows
-            for i in range(proposals[bz].shape[0]):
-                for j in range(bbox[bz].shape[0]):
-                    box_p = proposals[bz][i,:] #all columns with 1 by 1 rows--it has x1,y1,x2,y2
-                    bbox = bbox[bz][j,:]#both bbox and box_p are [200,4]
-                    iou = utils.IOU(box_p, bbox)
-                    if iou > 0.5:
-                        labels_p[i,:] = gt_labels[bz][j]
-            labels.append(labels_p)#labels is a list rather than a tensor
+            # for i in range(proposals[bz].shape[0]):
+            #     for j in range(bbox[bz].shape[0]):
+            #         box_p = proposals[bz][i,:] #all columns with 1 by 1 rows--it has x1,y1,x2,y2
+            #         bbox2 = bbox[bz][j,:]#both bbox and box_p are [200,4]
+            #         iou = IOU(box_p, bbox2)
+            #         if iou > 0.5:
+            #             labels_p[i,:] = gt_labels[bz][j]
+            # labels.append(labels_p)#labels is a list rather than a tensor
+            box = proposals[bz]
+            w = torch.abs(box[:,0] - box[:,2])
+            h = torch.abs(box[:,1] - box[:,3])
+            k = 4 + torch.log2(torch.sqrt(w*h)/224)
+            k = torch.clamp(k.to(torch.int), min = 2, max = 5) - 2
+            k2 = [[],[],[],[]]
+            for i in range(len(k)):
+                k2[k[i]].append(proposals[bz][i,:])
+            for i in range(4):
+                if(len(k2[i]) > 0):
+                    props = torch.stack(k2[i], dim = 0)
+                    # print("Proposals: ", proposals[bz].shape)
+                    # print("bbox: ", bbox[bz].shape)
+                    iou = IOU(props, bbox[bz])
+                    r,c = iou.shape
+                    max_vals, arg_max_vals = torch.max(iou, dim=1)
+                    labels_p = gt_labels[bz][arg_max_vals]
+                    a = max_vals < 0.5
+                    labels_p[a] = 0
+                    labels.append(labels_p)
 
-            box_star[:,0] = (bbox[:,0] + bbox[:,2])/2 #x*
-            bbox_star[:,1] = (bbox[:,1] + bbox[:,3])/2 #y*
-            bbox_star[:,2] = torch.abs(bbox[:,0] - bbox[:,2])#w*
-            bbox_star[:,3] = torch.abs(bbox[:,1] - bbox[:,3])#h*
+                    bbox_star = torch.zeros(r,4)
+                    bbox_reg = torch.zeros(r,4)
+                    regressor_p = torch.zeros(r,4)
+                    bbox_star[:,0] = (bbox[bz][arg_max_vals,0] + bbox[bz][arg_max_vals,2])/2 #x*
+                    bbox_star[:,1] = (bbox[bz][arg_max_vals,1] + bbox[bz][arg_max_vals,3])/2 #y*
+                    bbox_star[:,2] = torch.abs(bbox[bz][arg_max_vals,0] - bbox[bz][arg_max_vals,2])#w*
+                    bbox_star[:,3] = torch.abs(bbox[bz][arg_max_vals,1] - bbox[bz][arg_max_vals,3])#h*
 
-            box_reg[:,0] = (proposals[:,0] + proposals[:,2])/2 #xp
-            bbox_reg[:,1] = (proposals[:,1] + proposals[:,3])/2 #yp
-            bbox_reg[:,2] = torch.abs(proposals[:,0] - proposals[:,2])#wp
-            bbox_reg[:,3] = torch.abs(proposals[:,1] - proposals[:,3])#hp
+                    bbox_reg[:,0] = (props[:,0] + props[:,2])/2 #xp
+                    bbox_reg[:,1] = (props[:,1] + props[:,3])/2 #yp
+                    bbox_reg[:,2] = torch.abs(props[:,0] - props[:,2])#wp
+                    bbox_reg[:,3] = torch.abs(props[:,1] - props[:,3])#hp
 
-            regressor_p[:,0] = (box_star[:,0]-box_reg[:,0])/bbox_reg[:,2] #tx
-            regressor_p[:,1] = (box_star[:,1]-box_reg[:,1])/bbox_reg[:,3]) #ty
-            regressor_p[:,2] = torch.log(bbox_star[:,2]/bbox_reg[:,2])#tw
-            regressor_p[:,3] = torch.log(bbox_star[:,3]/bbox_reg[:,3])#th
-        regressor_target.append(regressor_p)
+                    regressor_p[:,0] = (bbox_star[:,0]-bbox_reg[:,0])/bbox_reg[:,2] #tx
+                    regressor_p[:,1] = (bbox_star[:,1]-bbox_reg[:,1])/bbox_reg[:,3] #ty
+                    regressor_p[:,2] = torch.log(bbox_star[:,2]/bbox_reg[:,2])#tw
+                    regressor_p[:,3] = torch.log(bbox_star[:,3]/bbox_reg[:,3])#th
+                    regressor_target.append(regressor_p)
         #the regressor_target is a list rather than a tensor
+        labels = torch.cat(labels, dim=0)
+        regressor_target = torch.cat(regressor_target, dim=0)
 
         return labels,regressor_target
 
@@ -81,22 +105,46 @@ class BoxHead(torch.nn.Module):
         feature_vectors=[]
         for bz in range(len(proposals)):
         #proposal[bz].shape = 200,4
-            output = torch.zeros(proposals[bz].shape[0],256*P*P)
+            # output = torch.zeros(proposals[bz].shape[0],256, P, P)
             box = proposals[bz] #these are x1,y1,x2,y2
             w = torch.abs(box[:,0] - box[:,2])#w* 1x200
             h = torch.abs(box[:,1] - box[:,3])#h*
-            k = 4 + int(torch.log2(torch.sqrt(w*h)/224)) #has to be 2,3,4,5 #1x200
-            idx = [i for i in range(len(k)) if (k[i]<=5 or k[i]>=2)]
-            for i in idx:
-                if k[i] == 2:
-                    output[i,:]= torchvision.ops.roi_align(fpn_feat_list[0],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
-                elif k[i] == 3:
-                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[1],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
-                elif k[i] == 4:
-                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[2],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
-                else:
-                    output[i,:] = torchvision.ops.roi_align(fpn_feat_list[3],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
-            feature_vectors.append(output)
+            k = 4 + torch.log2(torch.sqrt(w*h)/224) #has to be 2,3,4,5 #1x200
+            k = torch.clamp(k.to(torch.int), min = 2, max = 5) - 2
+            # idx = [i for i in range(len(k)) if (k[i]<=5 or k[i]>=2)]
+            # idx = torch.arange(len(k))
+            k2 = [[],[],[],[]]
+            # print("Here ", bz)
+            for i in range(len(k)):
+                r = 1088 / fpn_feat_list[k[i]].shape[3]
+                new_x1 = proposals[bz][i,0] / r
+                new_y1 = proposals[bz][i,1] / r
+                new_x2 = proposals[bz][i,2] / r
+                new_y2 = proposals[bz][i,3] / r
+                boxe = torch.tensor([bz, new_x1, new_y1, new_x2, new_y2])
+                k2[k[i]].append(boxe)
+            for i in range(4):
+                # print(torch.stack(k2[i], dim = 0).shape)
+                if(len(k2[i]) > 0):
+                    output = torchvision.ops.roi_align(fpn_feat_list[i], torch.stack(k2[i], dim = 0), 7)
+                    # print(output.shape)
+                    feature_vectors.append(torch.reshape(output, (-1, 256 * P * P)))
+            # print("Finished ", bz)
+
+
+                # output[i,:, : ,: ]= torchvision.ops.roi_align(fpn_feat_list[k[i]], boxe, (256, 7, 7))
+                # output[i,:]= torchvision.ops.roi_align(fpn_feat_list[k[i]],torch.reshape(proposals[bz][i,:], (1,4)),(256*P*P))
+                # if k[i] == 2:
+                #     output[i,:]= torchvision.ops.roi_align(fpn_feat_list[0],torch.reshape(proposals[bz][i,:], (1,4)),(256*P*P)) #check for fpn output ask karan
+                # elif k[i] == 3:
+                #     output[i,:] = torchvision.ops.roi_align(fpn_feat_list[1],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+                # elif k[i] == 4:
+                #     output[i,:] = torchvision.ops.roi_align(fpn_feat_list[2],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+                # else:
+                #     output[i,:] = torchvision.ops.roi_align(fpn_feat_list[3],proposals[bz][i,:],(256*P*P)) #check for fpn output ask karan
+
+            # feature_vectors.append(output)
+            # feature_vectors.append(torch.reshape(output, (-1, 256 * P * P)))
 
         return feature_vectors
 
@@ -212,8 +260,8 @@ class BoxHead(torch.nn.Module):
                 box_pred_new[row,:] = box_preds[row,4:8]
             elif idx[row]==1:
                 box_pred_new[row,:] = box_preds[row,0:4]
-            else:
-                pass
+            # else:
+            #     pass
         # for row in range(class_logits.shape[0]):
         #     if idx[row]==3:
         #         class_logits_new[row,:] = 3
@@ -224,17 +272,15 @@ class BoxHead(torch.nn.Module):
         #     else:
         #         pass
 
-
-
         loss_c = self.loss_class(class_logits,labels)
         loss_r = self.loss_reg(regression_targets, box_pred_new)
         loss = loss_c + (l * loss_r)
-        return loss, loss_class, loss_regr
+        return loss, loss_c, loss_r
 
     # Compute the loss of the classifier
     def loss_class(self,class_logits,labels):
         criterion = torch.nn.CrossEntropyLoss()
-        loss = criterion(class_logits,labels)
+        loss = criterion(class_logits,labels.to(torch.long))
         return loss
 
     # Compute the loss of the regressor
@@ -265,4 +311,4 @@ class BoxHead(torch.nn.Module):
 
         return class_logits, box_pred
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
