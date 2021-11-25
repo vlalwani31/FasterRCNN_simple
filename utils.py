@@ -4,10 +4,10 @@ from functools import partial
 def MultiApply(func, *args, **kwargs):
     pfunc = partial(func, **kwargs) if kwargs else func
     map_results = map(pfunc, *args)
-  
+
     return tuple(map(list, zip(*map_results)))
 
-# This function compute the IOU between two set of boxes 
+# This function compute the IOU between two set of boxes
 def IOU(boxA, boxB):
     if boxA.shape == (4,):
         boxA = boxA.reshape(1,-1)
@@ -56,10 +56,10 @@ def IOU(boxA, boxB):
 # Output:
 #       box: (total_proposals,4) ([x1,y1,x2,y2] format)
 def output_decoding(regressed_boxes_t,flatten_proposals, device='cpu'):
-    box = torch.ones(regressed_boxes.shape)
+    box = torch.ones(regressed_boxes_t.shape)
     #print(box.shape)
-    for i in range(regressed_boxes.shape[0]):
-      regressed = regressed_boxes[i,:]
+    for i in range(regressed_boxes_t.shape[0]):
+      regressed = regressed_boxes_t[i,:]
       proposals = flatten_proposals[i,:]
       tx = regressed[0]
       ty = regressed[1]

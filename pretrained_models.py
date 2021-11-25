@@ -10,7 +10,8 @@ def pretrained_models_680(checkpoint_file,eval=True):
     if(eval):
         model.eval()
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cpu')
     model.to(device)
 
     backbone = model.backbone
@@ -21,7 +22,7 @@ def pretrained_models_680(checkpoint_file,eval=True):
         rpn.eval()
 
     rpn.nms_thresh=0.6
-    checkpoint = torch.load(checkpoint_file)
+    checkpoint = torch.load(checkpoint_file, map_location=device)
 
     backbone.load_state_dict(checkpoint['backbone'])
     rpn.load_state_dict(checkpoint['rpn'])
@@ -32,7 +33,8 @@ if __name__ == '__main__':
 
     # Put the path were you save the given pretrained model
     pretrained_path='checkpoint680.pth'
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cpu')
     backbone, rpn = pretrained_models_680(pretrained_path)
 
     # we will need the ImageList from torchvision
@@ -107,4 +109,3 @@ if __name__ == '__main__':
                 plt.show()
 
             break
-

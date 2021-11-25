@@ -1,8 +1,9 @@
 # FasterRCNN_simple
 First step, remember to use git pull <br>
 Second step, download data: [Download Link](https://drive.google.com/drive/folders/1eP7FtPaWfJ5zLdcsZYl6eyn5EYixkFn8?usp=sharing) <br>
-Third step, Run the dataset.py file. This will train the model if model.pth is not present in the same folder as dataset.py. It will also perform pointwise Accuracy and before and after NMS inference. It also calculates the histogram for the assignment. <br>
-All the outputs would be saved in image format. <br>
+Third step, get the resnet50 cehckpoint <br>
+Forth step, To get the proposals with no-background class, run proposal_printer.py. This code will save 6 images on you machine that show the proposals with no-background class in blue boxes and shows the associated bounding box/boxes in red color. These images are stored with names starting with: no_background_200_props.<br>
+Fifth step, To train the model, run training_model.py. This will save the model with the name model.pth <br>
 The loss curves would be stored in files: (Training) tlc.png, tlr.png, tlt.png, (Validation) vlc.png, vlr.png and vlt.png. <br>
 Our top 20 proposals would be stored in png files with names starting with: top20props. <br>
 The NMS images would be stored under png files with names: beforeNMS and afterNMS. <br>

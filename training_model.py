@@ -26,8 +26,8 @@ def plot_fn(data,title,x_label,y_label, nam):
 if __name__ == '__main__':
     # Put the path were you save the given pretrained model
     pretrained_path='checkpoint680.pth'
-    # device = torch.device('cpu')
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cpu')
+    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     backbone, rpn = pretrained_models_680(pretrained_path)
     # backbone = backbone.to(device)
     # rpn = rpn.to(device)
@@ -46,7 +46,7 @@ if __name__ == '__main__':
     train_size = int(full_size * 0.8)
     test_size = full_size - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-    batch_size = 16
+    batch_size = 1
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -65,7 +65,7 @@ if __name__ == '__main__':
         boxHead.load_state_dict(checkpoint['box_head_state_dict'])
     else:
         optimizer = torch.optim.Adam(boxHead.parameters())
-        epochs = 2
+        epochs = 10
         for i in range(epochs):
             # Training Time
             loss_t_list = []

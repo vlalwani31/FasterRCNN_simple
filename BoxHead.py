@@ -164,24 +164,31 @@ class BoxHead(torch.nn.Module):
     #       scores: list:len(bz){(post_NMS_boxes_per_image)}   ( the score for the top class for the regressed box)
     #       labels: list:len(bz){(post_NMS_boxes_per_image)}   (top class of each regressed box)
     def postprocess_detections(self, class_logits, box_regression, proposals, conf_thresh=0.5, keep_num_preNMS=500, keep_num_postNMS=50):
-        out_c = mat_clas[None, :]
-        out_r = mat_coord[None, :]
-        out_r_, out_c_, anchors_ = output_flattening(out_r, out_c, self.anchors)  # (bz x grid_size[0] x grid_size[1],4)
-        out_bboxes = output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
-        img_size = (800, 1088)  # Image size
-        out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
-        out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
-
-        sorted_indices = torch.argsort(out_c_, descending=True)
-        sorted_indices = sorted_indices[:keep_num_preNMS]
-        prebox = out_bboxes
-        prebox = prebox[sorted_indices, :]
-        clas = out_c_
-        # print(clas.shape)
-        # print(sorted_indices)
-        clas = clas[sorted_indices]
-        # apply nms
-        nms_clas, nms_prebox = self.NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
+        # out_c = mat_clas[None, :]
+        # out_r = mat_coord[None, :]
+        # out_r_, out_c_, anchors_ = output_flattening(out_r, out_c, self.anchors)  # (bz x grid_size[0] x grid_size[1],4)
+        # out_bboxes = output_decoding(out_r_, anchors_)  # (bz x total anchors,4)
+        # img_size = (800, 1088)  # Image size
+        # out_bboxes[:, slice(0, 4, 2)] = np.clip(out_bboxes[:, slice(0, 4, 2)], 0, img_size[0])
+        # out_bboxes[:, slice(1, 4, 2)] = np.clip(out_bboxes[:, slice(1, 4, 2)], 0, img_size[1])
+        #
+        # sorted_indices = torch.argsort(out_c_, descending=True)
+        # sorted_indices = sorted_indices[:keep_num_preNMS]
+        # prebox = out_bboxes
+        # prebox = prebox[sorted_indices, :]
+        # clas = out_c_
+        # # print(clas.shape)
+        # # print(sorted_indices)
+        # clas = clas[sorted_indices]
+        # # apply nms
+        # nms_clas, nms_prebox = self.NMS(clas, prebox, IOU_thresh, keep_num_postNMS)
+        boxes = torch.zeros(class_logits.shape[0], 4)
+        max_vals, arg_max_vals = torch.max(nn.functional.softmax(class_logits), dim = 1)
+        for i in range(class_logits.shape[0]):
+            boxes[i,:] = output_decoding(box_pred[i, (4 *(arg_max_vals[i]- 1)).item():(4*arg_max_vals[i]).item()].unsqueeze(0), proposal_target[i,:].unsqueeze(0))
+        top_max = torch.argsort(max_vals, descending=True)
+        scores = max_vals
+        labels = arg_max_vals
         return boxes, scores, labels
 
     def NMS(self,clas, prebox, thresh, keep_num_postNMS):
